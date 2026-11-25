@@ -78,6 +78,12 @@ public class JoyStick extends View {
     private double disLng = 0;
     /* 用户最近一次亲手操作摇杆的时间，用于让巡航避让 */
     private long mLastManualMs = 0;
+    /** 巡航正在往摇杆里灌输入（此刻的 onMoveInfo 不算人工操作） */
+    private boolean mAutoInject = false;
+    /** 手指正按在摇杆上 */
+    private boolean mManualBusy = false;
+    private boolean mCruiseActive = false;
+    private RockerView mRckView = null;
     private double disLat = 0;
     private final SharedPreferences sharedPreferences;
     /* 历史记录悬浮窗相关 */
@@ -239,6 +245,54 @@ public class JoyStick extends View {
         return (System.currentTimeMillis() - mLastManualMs) < 1500;
     }
 
+    /** 手指此刻是否按在摇杆上（比时间窗可靠：松手立刻交还） */
+    public boolean isManualBusy() {
+        return mManualBusy;
+    }
+
+    /** 巡航开关：打开时摇杆松手自动回中，关掉时恢复原版「摇杆锁位」行为 */
+    public void setCruiseActive(boolean active) {
+        mCruiseActive = active;
+        mManualBusy = false;
+        if (mRckView != null) {
+            mRckView.setCruiseActive(active);
+            if (!active) {
+                mRckView.renderAuto(0.0, 0.0);
+            }
+        }
+        if (!active) {
+            cancelManualMove();
+        }
+    }
+
+    /**
+     * 巡航驱动摇杆：先把摇杆图钉按方位角摆到位（界面上真的在动），
+     * 再走与手动完全相同的 onMoveInfo 通道推一步。
+     *
+     * @param bearingDeg 方位角（0=正北，顺时针）
+     * @param speedMps   速度（米/秒）
+     * @param ratio      摇杆偏移比例 0~1（一般 1.0）
+     */
+    public void autoDrive(double bearingDeg, double speedMps, double ratio) {
+        if (mListener == null) {
+            return;
+        }
+        double angle = 90.0 - bearingDeg;   // RockerView 的角度定义：0=正东，90=正北
+        if (mRckView != null) {
+            mRckView.renderAuto(angle, ratio);
+        }
+        double distM = speedMps * 0.1;
+        double rad = Math.toRadians(bearingDeg);
+        double dLatKm = (distM * Math.cos(rad)) / 1000.0;
+        double dLngKm = (distM * Math.sin(rad)) / 1000.0;
+        mAutoInject = true;
+        try {
+            mListener.onMoveInfo(speedMps, dLngKm, dLatKm, bearingDeg);
+        } finally {
+            mAutoInject = false;
+        }
+    }
+
     /** 巡航开始时调用：掐掉手动长按的自动行走，避免两边一起推 */
     public void cancelManualMove() {
         try {
@@ -394,7 +448,18 @@ public class JoyStick extends View {
         });
         /* 方向键点击处理 */
         RockerView rckView = mJoystickLayout.findViewById(R.id.joystick_rocker);
-        rckView.setListener(this::processDirection);
+        rckView.setListener(new RockerView.RockerViewClickListener() {
+            @Override
+            public void clickAngleInfo(boolean auto, double angle, double r) {
+                processDirection(auto, angle, r);
+            }
+
+            @Override
+            public void onTouchState(boolean down) {
+                mManualBusy = down;
+            }
+        });
+        mRckView = rckView;
 
         /* 方向键点击处理 */
         ButtonView btnView = mJoystickLayout.findViewById(R.id.joystick_button);
@@ -411,7 +476,9 @@ public class JoyStick extends View {
     }
 
     private void processDirection(boolean auto, double angle, double r) {
-        mLastManualMs = System.currentTimeMillis();
+        if (!mAutoInject) {
+            mLastManualMs = System.currentTimeMillis();
+        }
         if (r <= 0) {
             mTimer.cancel();
             isMove = false;

@@ -184,21 +184,24 @@ public class ServiceGo extends Service {
     /** 巡航推进一帧（100 ms） */
     /** 巡航推进一帧（100 ms）：走摇杆通道，不和手动抢坐标 */
     private void advanceAuto() {
-        // 用户正在亲手操作摇杆 → 这一帧让位（松手 1.5 秒后巡航自动接上）
-        if (mJoyStick != null && mJoyStick.isUserActive()) {
+        // 手指正按在摇杆上 → 这一帧让位；一松手立刻交还（不看时间窗）
+        if (mJoyStick != null && mJoyStick.isManualBusy()) {
             return;
         }
         double[] p = mPilot.step(mCurLat, mCurLng, 0.1);
         if (p == null) {
             mAuto = false;
+            if (mJoyStick != null) {
+                mJoyStick.setCruiseActive(false);
+            }
             XLog.i("SERVICEGO: auto route finished");
             return;
         }
         double bearing = p[2];
         double speed = mPilot.getSpeed();
         if (mJoyStick != null) {
-            // 与手动同一条通道：JoyStick.onMoveInfo 负责更新 mCurLng/mCurLat/mCurBea/mSpeed
-            mJoyStick.pulseDrive(speed, bearing, 0.1);
+            // 摇杆通道：界面上摇杆真的被推到对应方位，再经 onMoveInfo 更新坐标
+            mJoyStick.autoDrive(bearing, speed, 1.0);
             mCruiseDist += speed * 0.1;
         } else {
             mCruiseDist += RoutePilot.distance(mCurLat, mCurLng, p[0], p[1]);
@@ -535,6 +538,7 @@ public class ServiceGo extends Service {
             mCruiseDist = 0.0;
             if (mJoyStick != null) {
                 mJoyStick.cancelManualMove();
+                mJoyStick.setCruiseActive(true);
             }
             mAuto = true;
             return true;
@@ -543,6 +547,9 @@ public class ServiceGo extends Service {
         public void stopAutoRoute() {
             mAuto = false;
             mPilot.stop();
+            if (mJoyStick != null) {
+                mJoyStick.setCruiseActive(false);
+            }
         }
 
         public boolean isAutoRoute() {

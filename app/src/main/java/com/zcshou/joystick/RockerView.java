@@ -39,6 +39,8 @@ public class RockerView extends View {
     private Bitmap mRockerBitmap = null;
     private boolean isAuto = false;
     private boolean isClick = false;
+    /** 巡航激活时：松手必须复位到中心，否则「锁住位置」会把巡航锁死 */
+    private boolean mCruiseActive = false;
 
     private RockerViewClickListener mListener;
     private final Context mContext;
@@ -133,18 +135,24 @@ public class RockerView extends View {
                     return true;
                 }
                 isClick = true;
+                if (mListener != null) {
+                    mListener.onTouchState(true);   // 真人开始操作摇杆，巡航让位
+                }
                 break;
             case MotionEvent.ACTION_MOVE:
                 moveToPosition(event.getX(), event.getY());
                 isClick = false;
                 break;
             case MotionEvent.ACTION_UP:
+                if (mListener != null) {
+                    mListener.onTouchState(false);  // 松手，巡航可以接回
+                }
                 if (isClick) {
                     isClick = false;
                     toggleLockCtrl();
                     invalidate();
                 }
-                if (!isAuto) {
+                if (!isAuto || mCruiseActive) {
                     moveToPosition(viewCenterX, viewCenterY);
                 }
                 performClick();
@@ -152,6 +160,31 @@ public class RockerView extends View {
         }
 
         return true;
+    }
+
+    /** 巡航时打开：松手自动回中 */
+    public void setCruiseActive(boolean active) {
+        mCruiseActive = active;
+    }
+
+    /**
+     * 巡航用：把摇杆圆点摆到指定角度/半径（只画，不产生触摸事件）。
+     *
+     * @param angleDeg 角度（0=正东，90=正北，与 moveToPosition 里的定义一致）
+     * @param ratio    偏移比例 0~1
+     */
+    public void renderAuto(double angleDeg, double ratio) {
+        double rad = Math.toRadians(angleDeg);
+        double maxR = outerCircleRadius - innerCircleRadius;
+        double r = Math.max(0.0, Math.min(1.0, ratio)) * maxR;
+        innerCenterX = (float) (viewCenterX + r * Math.cos(rad));
+        innerCenterY = (float) (viewCenterY - r * Math.sin(rad));
+        dstRect = new Rect(
+                (int) (innerCenterX - mRockerBitmap.getWidth()),
+                (int) (innerCenterY - mRockerBitmap.getHeight()),
+                (int) (innerCenterX + mRockerBitmap.getWidth()),
+                (int) (innerCenterY + mRockerBitmap.getHeight()));
+        invalidate();
     }
 
     private void moveToPosition(float x, float y) {
@@ -239,5 +272,9 @@ public class RockerView extends View {
          * 点击的角度信息
          */
         void clickAngleInfo(boolean auto, double angle, double r);
+
+        /** 手指按下/抬起（巡航用它判断「现在到底是谁在开车」） */
+        default void onTouchState(boolean down) {
+        }
     }
 }

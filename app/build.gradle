@@ -33,8 +33,8 @@ android {
         minSdkVersion 27
         //noinspection ExpiredTargetSdkVersion
         targetSdkVersion 32
-        versionCode 1127
-        versionName '1.12.7-route' // https://semver.org/lang/zh-CN/
+        versionCode 1128
+        versionName '1.12.8-route' // https://semver.org/lang/zh-CN/
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         resourceConfigurations += ['zh', 'zh-rCN', 'en', 'en-rUS']
         ndk {
